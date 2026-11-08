@@ -31,8 +31,8 @@ table{border-collapse:collapse;width:100%;white-space:nowrap;font-size:13px}th{p
   <section class="grid">
     <div class="panel">
       <h3>Mailbox & Domain Filter</h3>
-      <label for="domains">Domains (comma, semicolon, or line separated)</label>
-      <textarea id="domains" rows="3" placeholder="example.com&#10;anotherdomain.com"></textarea>
+      <label for="domains">Optional sender-domain filter (leave blank to show all emails)</label>
+      <textarea id="domains" rows="3" placeholder="Leave blank for all senders, or enter example.com&#10;anotherdomain.com"></textarea>
       <div class="controls" style="margin-top:12px">
         <button id="connectBtn" onclick="connectGmail()">Connect Gmail</button>
         <button id="checkBtn" onclick="checkEmails()" disabled>↻ Check Emails</button>
@@ -43,7 +43,7 @@ table{border-collapse:collapse;width:100%;white-space:nowrap;font-size:13px}th{p
     <div class="panel">
       <h3>Automatic Checking</h3>
       <label>Folder</label>
-      <select disabled style="width:100%"><option>Inbox + Spam (unread)</option></select>
+      <select disabled style="width:100%"><option>Inbox + Spam (read + unread)</option></select>
       <label>Refresh interval</label>
       <div class="controls">
         <input value="5 seconds" disabled style="width:110px">
@@ -73,7 +73,7 @@ table{border-collapse:collapse;width:100%;white-space:nowrap;font-size:13px}th{p
     <div class="tablewrap">
       <table>
         <thead><tr><th>SCL</th><th>FOLDER</th><th>DATE</th><th>SENDER</th><th>SUBJECT</th><th>STATUS</th></tr></thead>
-        <tbody id="emailTable"><tr><td colspan="6" class="empty">Connect Gmail and enter one or more domains.</td></tr></tbody>
+        <tbody id="emailTable"><tr><td colspan="6" class="empty">Connect Gmail. Leave the domain filter blank to show all emails.</td></tr></tbody>
       </table>
     </div>
     <div class="status" id="lastUpdate">Waiting for first check...</div>
@@ -136,7 +136,7 @@ function connectGmail() {
       accessToken = response.access_token;
       setConnected(true);
       showMessage('Gmail connected successfully.', false);
-      if (getDomains().length) await checkEmails();
+      await checkEmails();
     }
   });
 
@@ -241,19 +241,15 @@ async function checkEmails() {
   if (!accessToken || checking) return;
 
   const domains = getDomains();
-  if (!domains.length) {
-    showMessage('Enter at least one sender domain or exact sender email address.', true);
-    return;
-  }
-
+  // An empty filter means show every sender in Inbox and Spam.
   checking = true;
   document.getElementById('checkBtn').disabled = true;
   document.getElementById('connection').textContent = '● Checking Gmail...';
-  showMessage('Checking unread Inbox and Spam messages...', false);
+  showMessage('Checking Inbox and Spam messages (read + unread)...', false);
 
   try {
     const list = await gmailRequestWithRetry(
-      '/messages?q=' + encodeURIComponent('{in:inbox in:spam} is:unread') + '&maxResults=20'
+      '/messages?q=' + encodeURIComponent('{in:inbox in:spam}') + '&maxResults=50'
     );
     const refs = list.messages || [];
 
@@ -270,7 +266,7 @@ async function checkEmails() {
       if (!match) continue;
 
       const email = match[0].toLowerCase();
-      if (!emailMatchesDomain(email, domains)) continue;
+      if (domains.length && !emailMatchesDomain(email, domains)) continue;
 
       const scl = parseScl(headers);
       let status = 'OTHER';
@@ -303,7 +299,7 @@ async function checkEmails() {
     document.getElementById('connection').textContent = '● Gmail Connected';
 
     renderTable();
-    showMessage('Check completed. ' + found.length + ' matching unread emails found.', false);
+    showMessage('Check completed. ' + found.length + ' matching emails found in Inbox + Spam (latest 50 messages scanned).', false);
   } catch (err) {
     showMessage('Gmail API error: ' + (err.message || String(err)), true);
     if (err.status === 401) {
@@ -320,10 +316,6 @@ async function checkEmails() {
 
 function startAuto() {
   if (!accessToken) return;
-  if (!getDomains().length) {
-    showMessage('Enter at least one sender domain or exact sender email address.', true);
-    return;
-  }
   if (autoRunning) return;
 
   autoRunning = true;
