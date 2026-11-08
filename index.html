@@ -185,36 +185,29 @@ function getHeader(headers, name) {
   return h ? h.value : '';
 }
 
-
 function parseScl(headers) {
-  // Direct SCL headers
-  const names = [
-    'X-MS-Exchange-Organization-SCL',
-    'X-SCL',
-    'SCL'
-  ];
-
+  const names = ['X-MS-Exchange-Organization-SCL', 'X-SCL', 'SCL'];
   for (const name of names) {
     const value = getHeader(headers, name);
-    const match = value.trim().match(/^-?\d+$/);
-    if (match) return parseInt(match[0], 10);
+    if (/^-?\d+$/.test(value.trim())) return parseInt(value.trim(), 10);
   }
-
-  // Microsoft Forefront Antispam Report
-  const report = getHeader(
-    headers,
-    'X-Forefront-Antispam-Report'
-  );
-
-  const match = report.match(/(?:^|[;\s])SCL\s*:\s*(-?\d+)/i);
-
-  if (match) {
-    return parseInt(match[1], 10);
-  }
-
   return null;
 }
 
+async function gmailRequest(path) {
+  const response = await fetch(GMAIL_API + path, {
+    method: 'GET',
+    headers: {Authorization: 'Bearer ' + accessToken}
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = data?.error?.message || ('HTTP ' + response.status);
+    const err = new Error(error);
+    err.status = response.status;
+    throw err;
+  }
+  return data;
+}
 
 function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
