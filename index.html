@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gmail SCL Checker</title>
+<style>
+:root{font-family:Arial,Helvetica,sans-serif;color:#172033;background:#f3f6fb}
+*{box-sizing:border-box}body{margin:0}header{background:#111a2e;color:#fff;padding:17px 24px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.brand{font-size:22px;font-weight:700}.brand span{color:#62a0ff}.conn{background:#e5e7eb;color:#475569;padding:9px 13px;border-radius:5px;font-size:13px;font-weight:700}
+main{max-width:1500px;margin:auto;padding:20px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.panel,.stat{background:#fff;border:1px solid #e0e6ef;border-radius:7px;padding:19px;margin-bottom:16px}
+h3{font-size:16px;margin:0 0 16px}label{display:block;font-size:13px;color:#64748b;margin:10px 0 7px}
+input,textarea,select{font:14px Arial;padding:10px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;max-width:100%}
+textarea{width:100%;resize:vertical}button{border:0;border-radius:4px;background:#2865e8;color:#fff;font-weight:700;padding:11px 16px;cursor:pointer}
+button:hover{background:#174fc7}button:disabled{opacity:.5;cursor:not-allowed}.secondary{background:#fff;color:#263449;border:1px solid #cbd5e1}.danger{background:#dc3545}.controls{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:13px;margin-bottom:16px}.stat{margin:0}.number{font-size:31px;font-weight:700;margin-bottom:7px}.stat small{color:#64748b}.total{color:#172033}.clean{color:#16a34a}.spam{color:#dc2626}.other{color:#d97706}
+.tablehead{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}.tablewrap{overflow:auto;max-height:570px}
+table{border-collapse:collapse;width:100%;white-space:nowrap;font-size:13px}th{position:sticky;top:0;background:#f1f4f8;color:#536178;text-align:left;padding:12px;z-index:1}td{padding:12px;border-bottom:1px solid #edf0f4}tr:hover td{background:#f8fafc}
+.badge{padding:5px 9px;border-radius:4px;font-size:11px;font-weight:700}.bclean{background:#dcfce7;color:#15803d}.bspam{background:#fee2e2;color:#dc2626}.bother{background:#fff1d6;color:#a16207}.bnone{background:#e9edf3;color:#64748b}
+.muted,.status{font-size:12px;color:#64748b;margin-top:12px}.error{color:#dc2626}.ok{color:#15803d}.empty{text-align:center;padding:35px;color:#8490a2}
+.config-note{font-size:13px;line-height:1.5;color:#64748b;background:#f8fafc;border:1px solid #e2e8f0;padding:12px;border-radius:5px;margin-top:12px}
+@media(max-width:800px){.grid{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}main{padding:10px}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">✉ Gmail <span>SCL Checker</span></div>
+  <div class="conn" id="connection">● Not connected</div>
+</header>
+<main>
+  <section class="grid">
+    <div class="panel">
+      <h3>Mailbox & Domain Filter</h3>
+      <label for="domains">Domains (comma, semicolon, or line separated)</label>
+      <textarea id="domains" rows="3" placeholder="example.com&#10;anotherdomain.com"></textarea>
+      <div class="controls" style="margin-top:12px">
+        <button id="connectBtn" onclick="connectGmail()">Connect Gmail</button>
+        <button id="checkBtn" onclick="checkEmails()" disabled>↻ Check Emails</button>
+        <button class="secondary" onclick="clearDomains()">Clear</button>
+      </div>
+      <div class="config-note">This page uses Google OAuth and the Gmail API directly. It only requests read-only access and does not mark messages as read, move, or delete them.</div>
+    </div>
+    <div class="panel">
+      <h3>Automatic Checking</h3>
+      <label>Folder</label>
+      <select disabled style="width:100%"><option>Inbox + Spam (unread)</option></select>
+      <label>Refresh interval</label>
+      <div class="controls">
+        <input value="5 seconds" disabled style="width:110px">
+        <button id="startBtn" onclick="startAuto()" disabled>▶ Start Auto</button>
+        <button id="stopBtn" class="danger" onclick="stopAuto()" disabled>■ Stop</button>
+        <button class="secondary" id="disconnectBtn" onclick="disconnectGmail()" disabled>Disconnect</button>
+      </div>
+      <div class="status" id="autoStatus">Automatic checking is stopped.</div>
+    </div>
+  </section>
+
+  <section class="stats">
+    <div class="stat"><div class="number total" id="total">0</div><small>Total emails</small></div>
+    <div class="stat"><div class="number clean" id="clean">0</div><small>SCL 1 · Clean</small></div>
+    <div class="stat"><div class="number spam" id="spam">0</div><small>SCL 5+ · Spam</small></div>
+    <div class="stat"><div class="number other" id="other">0</div><small>No SCL / Other</small></div>
+  </section>
+
+  <section class="panel">
+    <div class="tablehead">
+      <h3 style="margin:0">Emails <small id="shown" class="muted">0 shown</small></h3>
+      <div class="controls">
+        <input id="search" placeholder="Search subject / sender..." oninput="renderTable()">
+        <button class="secondary" onclick="exportCSV()">Export CSV</button>
+      </div>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>SCL</th><th>FOLDER</th><th>DATE</th><th>SENDER</th><th>SUBJECT</th><th>STATUS</th></tr></thead>
+        <tbody id="emailTable"><tr><td colspan="6" class="empty">Connect Gmail and enter one or more domains.</td></tr></tbody>
+      </table>
+    </div>
+    <div class="status" id="lastUpdate">Waiting for first check...</div>
+    <div class="status" id="message"></div>
+  </section>
+</main>
+
+<!-- Google API client and Google Identity Services -->
+<script src="https://accounts.google.com/gsi/client"></script>
+<script>
+/*
+  SETUP:
+  1. Enable Gmail API in Google Cloud.
+  2. Configure OAuth consent screen.
+  3. Create OAuth 2.0 Client ID (Web application).
+  4. Add your GitHub Pages URL to Authorized JavaScript origins.
+  5. Paste the Client ID below.
+*/
+const GOOGLE_CLIENT_ID = 'PASTE_YOUR_GOOGLE_OAUTH_CLIENT_ID_HERE';
+const SCOPES = 'https://www.googleapis.com/auth/gmail.readonly';
+const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1/users/me';
+const INTERVAL_MS = 5000;
+
+let tokenClient = null;
+let accessToken = null;
+let autoRunning = false;
+let checking = false;
+let timer = null;
+let emailData = [];
+let identityReady = false;
+
+window.addEventListener('load', () => {
+  // This version calls Gmail REST endpoints with fetch; it does not need gapi.client.
+  if (window.google && google.accounts && google.accounts.oauth2) {
+    identityReady = true;
+    showMessage('Ready. Connect your Google account to begin.', false);
+  } else {
+    showMessage('Google sign-in library did not load. Check your connection, disable script blockers, and reload.', true);
+  }
+});
+
+function connectGmail() {
+  if (!identityReady || !window.google?.accounts?.oauth2) {
+    showMessage('Google sign-in is not ready. Reload the page and try again.', true);
+    return;
+  }
+  if (GOOGLE_CLIENT_ID.startsWith('PASTE_')) {
+    showMessage('Add your Google OAuth Client ID in GOOGLE_CLIENT_ID before connecting.', true);
+    return;
+  }
+
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: GOOGLE_CLIENT_ID,
+    scope: SCOPES,
+    callback: async (response) => {
+      if (response.error) {
+        showMessage('Google sign-in failed: ' + response.error, true);
+        return;
+      }
+      accessToken = response.access_token;
+      setConnected(true);
+      showMessage('Gmail connected successfully.', false);
+      if (getDomains().length) await checkEmails();
+    }
+  });
+
+  tokenClient.requestAccessToken({prompt:'consent'});
+}
+
+function setConnected(connected) {
+  const el = document.getElementById('connection');
+  el.textContent = connected ? '● Gmail Connected' : '● Not connected';
+  el.style.background = connected ? '#e5f9ed' : '#e5e7eb';
+  el.style.color = connected ? '#15803d' : '#475569';
+  document.getElementById('connectBtn').disabled = connected;
+  document.getElementById('checkBtn').disabled = !connected;
+  document.getElementById('startBtn').disabled = !connected;
+  document.getElementById('disconnectBtn').disabled = !connected;
+}
+
+function disconnectGmail() {
+  stopAuto();
+  if (accessToken && window.google?.accounts?.oauth2) {
+    google.accounts.oauth2.revoke(accessToken, () => {});
+  }
+  accessToken = null;
+  setConnected(false);
+  showMessage('Gmail disconnected.', false);
+}
+
+function getDomains() {
+  return document.getElementById('domains').value
+    .split(/[\s,;]+/)
+    .map(x => x.trim().toLowerCase().replace(/^@/, ''))
+    .filter(Boolean);
+}
+
+function emailMatchesDomain(email, domains) {
+  const domain = (email.split('@').pop() || '').toLowerCase();
+  return domains.some(d => {
+    // Accept either a sender domain (example.com) or an exact email address.
+    if (d.includes('@')) return email.toLowerCase() === d;
+    return domain === d || domain.endsWith('.' + d);
+  });
+}
+
+function getHeader(headers, name) {
+  const h = headers.find(x => x.name.toLowerCase() === name.toLowerCase());
+  return h ? h.value : '';
+}
+
+function parseScl(headers) {
+  const names = ['X-MS-Exchange-Organization-SCL', 'X-SCL', 'SCL'];
+  for (const name of names) {
+    const value = getHeader(headers, name);
+    if (/^-?\d+$/.test(value.trim())) return parseInt(value.trim(), 10);
+  }
+  return null;
+}
+
+async function gmailRequest(path) {
+  const response = await fetch(GMAIL_API + path, {
+    method: 'GET',
+    headers: {Authorization: 'Bearer ' + accessToken}
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = data?.error?.message || ('HTTP ' + response.status);
+    const err = new Error(error);
+    err.status = response.status;
+    throw err;
+  }
+  return data;
+}
+
+async function checkEmails() {
+  if (!accessToken || checking) return;
+
+  const domains = getDomains();
+  if (!domains.length) {
+    showMessage('Enter at least one sender domain or exact sender email address.', true);
+    return;
+  }
+
+  checking = true;
+  document.getElementById('checkBtn').disabled = true;
+  document.getElementById('connection').textContent = '● Checking Gmail...';
+  showMessage('Checking unread Inbox and Spam messages...', false);
+
+  try {
+    const list = await gmailRequest(
+      '/messages?q=' + encodeURIComponent('{in:inbox in:spam} is:unread') + '&maxResults=50'
+    );
+    const refs = list.messages || [];
+
+    // Fetch message metadata in parallel, with a small batch to keep requests manageable.
+    const messages = await Promise.all(refs.map(ref =>
+      gmailRequest('/messages/' + encodeURIComponent(ref.id) + '?format=full')
+    ));
+
+    const found = [];
+    for (const msg of messages) {
+      const headers = msg.payload?.headers || [];
+      const from = getHeader(headers, 'From');
+      const match = from.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+      if (!match) continue;
+
+      const email = match[0].toLowerCase();
+      if (!emailMatchesDomain(email, domains)) continue;
+
+      const scl = parseScl(headers);
+      let status = 'OTHER';
+      if (scl === 1) status = 'CLEAN';
+      else if (scl !== null && scl >= 5) status = 'SPAM';
+
+      const labels = msg.labelIds || [];
+      found.push({
+        id: msg.id,
+        sender: from,
+        email,
+        subject: getHeader(headers, 'Subject') || '(No subject)',
+        date: getHeader(headers, 'Date') || '',
+        folder: labels.includes('SPAM') ? 'Spam' : 'Inbox',
+        scl,
+        status
+      });
+    }
+
+    found.sort((a,b) => new Date(b.date) - new Date(a.date));
+    emailData = found;
+
+    const clean = found.filter(x => x.status === 'CLEAN').length;
+    const spam = found.filter(x => x.status === 'SPAM').length;
+    document.getElementById('total').textContent = found.length;
+    document.getElementById('clean').textContent = clean;
+    document.getElementById('spam').textContent = spam;
+    document.getElementById('other').textContent = found.length - clean - spam;
+    document.getElementById('lastUpdate').textContent = 'Last update: ' + new Date().toLocaleString();
+    document.getElementById('connection').textContent = '● Gmail Connected';
+
+    renderTable();
+    showMessage('Check completed. ' + found.length + ' matching unread emails found.', false);
+  } catch (err) {
+    showMessage('Gmail API error: ' + (err.message || String(err)), true);
+    if (err.status === 401) {
+      accessToken = null;
+      stopAuto();
+      setConnected(false);
+    }
+  } finally {
+    checking = false;
+    document.getElementById('checkBtn').disabled = !accessToken;
+    if (autoRunning) scheduleNext();
+  }
+}
+
+function startAuto() {
+  if (!accessToken) return;
+  if (!getDomains().length) {
+    showMessage('Enter at least one sender domain or exact sender email address.', true);
+    return;
+  }
+  if (autoRunning) return;
+
+  autoRunning = true;
+  document.getElementById('startBtn').disabled = true;
+  document.getElementById('stopBtn').disabled = false;
+  document.getElementById('autoStatus').textContent = 'Auto Check running · every 5 seconds';
+  if (!checking) checkEmails();
+}
+
+function stopAuto() {
+  autoRunning = false;
+  if (timer) clearTimeout(timer);
+  timer = null;
+  document.getElementById('startBtn').disabled = !accessToken;
+  document.getElementById('stopBtn').disabled = true;
+  document.getElementById('autoStatus').textContent = 'Automatic checking is stopped.';
+}
+
+function scheduleNext() {
+  if (!autoRunning) return;
+  if (timer) clearTimeout(timer);
+  timer = setTimeout(() => {
+    if (autoRunning && !checking) checkEmails();
+  }, INTERVAL_MS);
+}
+
+function renderTable() {
+  const query = document.getElementById('search').value.toLowerCase();
+  const rows = emailData.filter(e =>
+    (e.subject || '').toLowerCase().includes(query) ||
+    (e.sender || '').toLowerCase().includes(query) ||
+    (e.email || '').toLowerCase().includes(query)
+  );
+  document.getElementById('shown').textContent = rows.length + ' shown';
+  const tbody = document.getElementById('emailTable');
+
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty">No matching emails found.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = rows.map(e => {
+    const cls = e.status === 'CLEAN' ? 'bclean' :
+      e.status === 'SPAM' ? 'bspam' :
+      (e.scl === null ? 'bnone' : 'bother');
+    const date = e.date ? new Date(e.date).toLocaleString() : '';
+    return `<tr>
+      <td>${escapeHTML(e.scl === null ? 'Not Found' : String(e.scl))}</td>
+      <td>${escapeHTML(e.folder)}</td>
+      <td>${escapeHTML(date)}</td>
+      <td title="${escapeHTML(e.email)}">${escapeHTML(e.sender)}</td>
+      <td>${escapeHTML(e.subject)}</td>
+      <td><span class="badge ${cls}">${escapeHTML(e.status)}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+function escapeHTML(value) {
+  return String(value ?? '').replace(/[&<>"']/g, c => ({
+    '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
+  })[c]);
+}
+
+function showMessage(message, isError) {
+  const el = document.getElementById('message');
+  el.textContent = message;
+  el.className = 'status ' + (isError ? 'error' : 'ok');
+}
+
+function clearDomains() {
+  document.getElementById('domains').value = '';
+  emailData = [];
+  stopAuto();
+  ['total','clean','spam','other'].forEach(id => {
+    document.getElementById(id).textContent = '0';
+  });
+  renderTable();
+  showMessage('Domains and displayed results cleared.', false);
+}
+
+function exportCSV() {
+  if (!emailData.length) {
+    showMessage('No results to export.', true);
+    return;
+  }
+  const headers = ['SCL','Folder','Date','Sender','Email','Subject','Status'];
+  const rows = emailData.map(e => [
+    e.scl ?? '', e.folder, e.date, e.sender, e.email, e.subject, e.status
+  ]);
+  const csv = [headers,...rows]
+    .map(row => row.map(v => '"' + String(v ?? '').replace(/"/g,'""') + '"').join(','))
+    .join('\r\n');
+  const blob = new Blob(['\uFEFF' + csv], {type:'text/csv;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'Gmail-SCL-Results.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+</script>
+
+</body>
+</html>
