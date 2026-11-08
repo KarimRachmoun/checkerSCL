@@ -209,6 +209,34 @@ async function gmailRequest(path) {
   return data;
 }
 
+function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function isTemporaryGmailLimit(error) {
+  const message = String(error?.message || '').toLowerCase();
+  return error?.status === 429 ||
+    (error?.status === 403 && (
+      message.includes('too many concurrent') ||
+      message.includes('ratelimit') ||
+      message.includes('rate limit') ||
+      message.includes('user rate')
+    ));
+}
+
+async function gmailRequestWithRetry(path, attempts = 4) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await gmailRequest(path);
+    } catch (error) {
+      if (!isTemporaryGmailLimit(error) || attempt >= attempts - 1) throw error;
+      const delay = Math.min(1000 * (2 ** attempt), 8000);
+      showMessage('Gmail is busy. Retrying in ' + (delay / 1000) + 's...', false);
+      await wait(delay);
+    }
+  }
+}
+
 async function checkEmails() {
   if (!accessToken || checking) return;
 
@@ -224,18 +252,18 @@ async function checkEmails() {
   showMessage('Checking unread Inbox and Spam messages...', false);
 
   try {
-    const list = await gmailRequest(
-      '/messages?q=' + encodeURIComponent('{in:inbox in:spam} is:unread') + '&maxResults=50'
+    const list = await gmailRequestWithRetry(
+      '/messages?q=' + encodeURIComponent('{in:inbox in:spam} is:unread') + '&maxResults=20'
     );
     const refs = list.messages || [];
 
-    // Fetch message metadata in parallel, with a small batch to keep requests manageable.
-    const messages = await Promise.all(refs.map(ref =>
-      gmailRequest('/messages/' + encodeURIComponent(ref.id) + '?format=full')
-    ));
-
+    // Fetch one message at a time to avoid Gmail's concurrent-request limit.
     const found = [];
-    for (const msg of messages) {
+    for (const ref of refs) {
+      const msg = await gmailRequestWithRetry(
+        '/messages/' + encodeURIComponent(ref.id) + '?format=full'
+      );
+      await wait(200);
       const headers = msg.payload?.headers || [];
       const from = getHeader(headers, 'From');
       const match = from.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
